@@ -1,0 +1,17 @@
+# compiled binaries
+*.out
+*.o
+file_copy_nbytes
+fork_n_children
+parent_wait_child
+cpu_scheduler
+exp7_mlfq
+exp9_paging
+exp10_fixed_partitioning
+exp11_variable_partitioning
+exp12_banker_prodcons
+exp13_semaphore_rag
+# files created when running Lab 4
+sample_output.txt
+dest_oversize.txt
+.DS_Store
