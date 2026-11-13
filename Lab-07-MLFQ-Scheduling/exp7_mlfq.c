@@ -1,90 +1,53 @@
 /*
- * ==============================================================================
  * OPERATING SYSTEMS LABORATORY (CS-502) - EXPERIMENT 7
  * Student Name   : Aradhya Jain
  * Scholar Number : 24112011111
  * Section        : CSE-1
- * Semester       : V Semester, B.Tech CSE
- * Institution    : Maulana Azad National Institute of Technology (MANIT) Bhopal
- * ==============================================================================
- * AIM: Simulation of Multilevel Feedback Queue (MLFQ) CPU Scheduling in C
- *      using a dynamic linked list data structure.
- *
- * SPECIFICATION:
- *   - Queue 1: Round Robin (Time Quantum = 2), CPU time allocation budget = 8
- *   - Queue 2: Round Robin (Time Quantum = 4), CPU time allocation budget = 16
- *   - Queue 3: First-Come First-Served (FCFS), CPU time allocation budget = 32
- * ==============================================================================
+ * AIM: Simulation of Multilevel Feedback Queue (MLFQ) CPU Scheduling
+ *   - Q1: Round Robin (q = 2),  budget = 8
+ *   - Q2: Round Robin (q = 4),  budget = 16
+ *   - Q3: FCFS,                 budget = 32
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
 
-// Process node structure using linked list
-typedef struct ProcessNode {
-    char pid[8];
-    int arrival_time;
-    int burst_time;
-    int remaining_time;
-    int completion_time;
-    int turnaround_time;
-    int waiting_time;
-    int response_time;
-    int first_cpu_time;
-    int queue_level; // 1 = Q1 (RR2), 2 = Q2 (RR4), 3 = Q3 (FCFS)
-    struct ProcessNode *next;
-} ProcessNode;
+#define N 4
 
-// Queue structure with head and tail pointers
-typedef struct {
-    ProcessNode *head;
-    ProcessNode *tail;
-    int count;
-} Queue;
+char *pid[N] = {"P1", "P2", "P3", "P4"};
+int at[N] = {0, 0, 0, 0};    // arrival time
+int bt[N] = {4, 2, 6, 15};   // burst time
+int rem[N], ct[N], rt[N];    // remaining, completion, response time
 
-void init_queue(Queue *q) {
-    q->head = NULL;
-    q->tail = NULL;
-    q->count = 0;
-}
+// 3 queues (index 0,1,2 = Q1,Q2,Q3) stored as plain arrays
+int queue[3][100], front[3], rear[3];
+int t = 0, done = 0;
 
-bool is_empty(Queue *q) {
-    return q->head == NULL;
-}
+// Run one queue level until it is empty or its budget is used up
+void run_queue(int lv, int tq, int budget) {
+    int used = 0;
+    while (front[lv] < rear[lv] && used < budget) {
+        int i = queue[lv][front[lv]++];          // dequeue
+        if (rt[i] == -1) rt[i] = t - at[i];      // first time on CPU
 
-void enqueue(Queue *q, ProcessNode *node) {
-    node->next = NULL;
-    if (q->tail == NULL) {
-        q->head = node;
-        q->tail = node;
-    } else {
-        q->tail->next = node;
-        q->tail = node;
+        int run = rem[i] < tq ? rem[i] : tq;     // run for one quantum
+        if (used + run > budget) run = budget - used;
+
+        printf("  [Time %2d -> %2d] Process %s executed in Queue Q%d\n", t, t + run, pid[i], lv + 1);
+        t += run;
+        rem[i] -= run;
+        used += run;
+
+        if (rem[i] == 0) {
+            ct[i] = t;
+            done++;
+            printf("  >> Process %s COMPLETED at t = %d ms\n", pid[i], t);
+        } else if (lv < 2) {
+            queue[lv + 1][rear[lv + 1]++] = i;   // not finished: demote to next queue
+            printf("  >> Process %s demoted to Queue Q%d (Remaining BT = %d ms)\n", pid[i], lv + 2, rem[i]);
+        } else {
+            queue[lv][rear[lv]++] = i;           // Q3: back of the same queue
+        }
     }
-    q->count++;
-}
-
-ProcessNode* dequeue(Queue *q) {
-    if (is_empty(q)) return NULL;
-    ProcessNode *node = q->head;
-    q->head = q->head->next;
-    if (q->head == NULL) {
-        q->tail = NULL;
-    }
-    node->next = NULL;
-    q->count--;
-    return node;
-}
-
-// Global process storage for reporting
-#define MAX_PROC 10
-ProcessNode all_processes[MAX_PROC];
-int total_processes = 0;
-
-void print_gantt_entry(int start, int end, const char *pid, int queue_no) {
-    printf("  [Time %2d -> %2d] Process %s executed in Queue Q%d\n", start, end, pid, queue_no);
 }
 
 int main() {
@@ -94,202 +57,45 @@ int main() {
     printf("   Student: Aradhya Jain | Scholar No: 24112011111 | Section: CSE-1\n");
     printf("========================================================================================\n\n");
 
-    // Benchmark workload as per Lab Manual
-    const char *pids[] = {"P1", "P2", "P3", "P4"};
-    int bursts[] = {4, 2, 6, 15};
-    int arrivals[] = {0, 0, 0, 0};
-    total_processes = 4;
-
     printf("Input Workload Parameters (All processes arrive in Queue 1 at t = 0):\n");
     printf("----------------------------------------------------------------------------------------\n");
     printf("  Process   Arrival Time   Burst Time   Initial Queue\n");
     printf("----------------------------------------------------------------------------------------\n");
-    for (int i = 0; i < total_processes; i++) {
-        strcpy(all_processes[i].pid, pids[i]);
-        all_processes[i].arrival_time = arrivals[i];
-        all_processes[i].burst_time = bursts[i];
-        all_processes[i].remaining_time = bursts[i];
-        all_processes[i].completion_time = 0;
-        all_processes[i].turnaround_time = 0;
-        all_processes[i].waiting_time = 0;
-        all_processes[i].response_time = -1;
-        all_processes[i].first_cpu_time = -1;
-        all_processes[i].queue_level = 1;
-        all_processes[i].next = NULL;
-        printf("    %-8s %-14d %-12d Q1 (RR, q=2)\n", pids[i], arrivals[i], bursts[i]);
+    for (int i = 0; i < N; i++) {
+        rem[i] = bt[i];
+        rt[i] = -1;
+        queue[0][rear[0]++] = i;                 // everyone starts in Q1
+        printf("    %-8s %-14d %-12d Q1 (RR, q=2)\n", pid[i], at[i], bt[i]);
     }
     printf("----------------------------------------------------------------------------------------\n\n");
-
-    // Initialize the three queues
-    Queue q1, q2, q3;
-    init_queue(&q1);
-    init_queue(&q2);
-    init_queue(&q3);
-
-    // Enqueue all initial processes into Queue 1
-    for (int i = 0; i < total_processes; i++) {
-        enqueue(&q1, &all_processes[i]);
-    }
-
-    int current_time = 0;
-    int completed = 0;
 
     printf("Gantt Chart & Multilevel Execution Trace:\n");
     printf("----------------------------------------------------------------------------------------\n");
-
-    while (completed < total_processes) {
-        // -------------------------------------------------------------
-        // Queue 1: Round Robin (Time Quantum = 2), CPU Time Slice = 8
-        // -------------------------------------------------------------
-        if (!is_empty(&q1)) {
-            int q1_time_spent = 0;
-            const int q1_budget = 8;
-            const int q1_tq = 2;
-
-            while (!is_empty(&q1) && q1_time_spent < q1_budget) {
-                ProcessNode *curr = dequeue(&q1);
-
-                if (curr->first_cpu_time == -1) {
-                    curr->first_cpu_time = current_time;
-                    curr->response_time = current_time - curr->arrival_time;
-                }
-
-                int run_time = (curr->remaining_time > q1_tq) ? q1_tq : curr->remaining_time;
-                // Check if running exceeds budget
-                if (q1_time_spent + run_time > q1_budget) {
-                    run_time = q1_budget - q1_time_spent;
-                }
-
-                print_gantt_entry(current_time, current_time + run_time, curr->pid, 1);
-                current_time += run_time;
-                curr->remaining_time -= run_time;
-                q1_time_spent += run_time;
-
-                if (curr->remaining_time == 0) {
-                    curr->completion_time = current_time;
-                    curr->turnaround_time = curr->completion_time - curr->arrival_time;
-                    curr->waiting_time = curr->turnaround_time - curr->burst_time;
-                    completed++;
-                    printf("  >> Process %s COMPLETED at t = %d ms\n", curr->pid, current_time);
-                } else {
-                    // Demote to Queue 2 (RR, q = 4)
-                    curr->queue_level = 2;
-                    enqueue(&q2, curr);
-                    printf("  >> Process %s demoted to Queue Q2 (Remaining BT = %d ms)\n", curr->pid, curr->remaining_time);
-                }
-            }
-        }
-        // -------------------------------------------------------------
-        // Queue 2: Round Robin (Time Quantum = 4), CPU Time Slice = 16
-        // -------------------------------------------------------------
-        else if (!is_empty(&q2)) {
-            int q2_time_spent = 0;
-            const int q2_budget = 16;
-            const int q2_tq = 4;
-
-            while (!is_empty(&q2) && q2_time_spent < q2_budget) {
-                // If higher queue received jobs, preemption would occur (not here since all arrived at t=0)
-                ProcessNode *curr = dequeue(&q2);
-
-                if (curr->first_cpu_time == -1) {
-                    curr->first_cpu_time = current_time;
-                    curr->response_time = current_time - curr->arrival_time;
-                }
-
-                int run_time = (curr->remaining_time > q2_tq) ? q2_tq : curr->remaining_time;
-                if (q2_time_spent + run_time > q2_budget) {
-                    run_time = q2_budget - q2_time_spent;
-                }
-
-                print_gantt_entry(current_time, current_time + run_time, curr->pid, 2);
-                current_time += run_time;
-                curr->remaining_time -= run_time;
-                q2_time_spent += run_time;
-
-                if (curr->remaining_time == 0) {
-                    curr->completion_time = current_time;
-                    curr->turnaround_time = curr->completion_time - curr->arrival_time;
-                    curr->waiting_time = curr->turnaround_time - curr->burst_time;
-                    completed++;
-                    printf("  >> Process %s COMPLETED at t = %d ms\n", curr->pid, current_time);
-                } else {
-                    // Demote to Queue 3 (FCFS)
-                    curr->queue_level = 3;
-                    enqueue(&q3, curr);
-                    printf("  >> Process %s demoted to Queue Q3 (Remaining BT = %d ms)\n", curr->pid, curr->remaining_time);
-                }
-            }
-        }
-        // -------------------------------------------------------------
-        // Queue 3: First-Come First-Served (FCFS), CPU Time Slice = 32
-        // -------------------------------------------------------------
-        else if (!is_empty(&q3)) {
-            int q3_time_spent = 0;
-            const int q3_budget = 32;
-
-            while (!is_empty(&q3) && q3_time_spent < q3_budget) {
-                ProcessNode *curr = dequeue(&q3);
-
-                if (curr->first_cpu_time == -1) {
-                    curr->first_cpu_time = current_time;
-                    curr->response_time = current_time - curr->arrival_time;
-                }
-
-                int run_time = curr->remaining_time;
-                if (q3_time_spent + run_time > q3_budget) {
-                    run_time = q3_budget - q3_time_spent;
-                }
-
-                print_gantt_entry(current_time, current_time + run_time, curr->pid, 3);
-                current_time += run_time;
-                curr->remaining_time -= run_time;
-                q3_time_spent += run_time;
-
-                if (curr->remaining_time == 0) {
-                    curr->completion_time = current_time;
-                    curr->turnaround_time = curr->completion_time - curr->arrival_time;
-                    curr->waiting_time = curr->turnaround_time - curr->burst_time;
-                    completed++;
-                    printf("  >> Process %s COMPLETED at t = %d ms\n", curr->pid, current_time);
-                } else {
-                    // Re-enqueue in Queue 3 if budget expired before job finished
-                    enqueue(&q3, curr);
-                }
-            }
-        }
-        else {
-            current_time++;
-        }
+    // Always serve the highest non-empty queue
+    while (done < N) {
+        if (front[0] < rear[0])      run_queue(0, 2, 8);
+        else if (front[1] < rear[1]) run_queue(1, 4, 16);
+        else if (front[2] < rear[2]) run_queue(2, 32, 32);   // FCFS = no real quantum
+        else t++;
     }
-
     printf("----------------------------------------------------------------------------------------\n\n");
 
-    // Print Final Performance Metrics Table
     printf("FINAL MLFQ PERFORMANCE REPORT:\n");
     printf("========================================================================================\n");
     printf("  PID   Arrival   Burst   Completion(CT)   Turnaround(TAT)   Waiting(WT)   Response(RT)\n");
     printf("----------------------------------------------------------------------------------------\n");
-
-    double total_tat = 0, total_wt = 0, total_rt = 0;
-    for (int i = 0; i < total_processes; i++) {
-        printf("  %-5s %-9d %-7d %-16d %-17d %-13d %-12d\n",
-               all_processes[i].pid,
-               all_processes[i].arrival_time,
-               all_processes[i].burst_time,
-               all_processes[i].completion_time,
-               all_processes[i].turnaround_time,
-               all_processes[i].waiting_time,
-               all_processes[i].response_time);
-        total_tat += all_processes[i].turnaround_time;
-        total_wt  += all_processes[i].waiting_time;
-        total_rt  += all_processes[i].response_time;
+    double sum_tat = 0, sum_wt = 0, sum_rt = 0;
+    for (int i = 0; i < N; i++) {
+        int tat = ct[i] - at[i];                 // TAT = CT - AT
+        int wt = tat - bt[i];                    // WT  = TAT - BT
+        printf("  %-5s %-9d %-7d %-16d %-17d %-13d %-12d\n", pid[i], at[i], bt[i], ct[i], tat, wt, rt[i]);
+        sum_tat += tat;
+        sum_wt += wt;
+        sum_rt += rt[i];
     }
     printf("----------------------------------------------------------------------------------------\n");
     printf("  AVERAGES:  Average TAT = %.2f ms  |  Average WT = %.2f ms  |  Average RT = %.2f ms\n",
-           total_tat / total_processes,
-           total_wt / total_processes,
-           total_rt / total_processes);
+           sum_tat / N, sum_wt / N, sum_rt / N);
     printf("========================================================================================\n");
-
     return 0;
 }

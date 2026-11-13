@@ -7,79 +7,46 @@
  *   Semester       : V Semester, B.Tech CSE
  *   Institution    : Maulana Azad National Institute of Technology (MANIT)
  * ============================================================================
+ *
+ * a. Generic CPU scheduling: FCFS, SJF, SRTF, Round Robin,
+ *    Priority (Non-Preemptive), Priority (Preemptive).
+ *    Input: n, then "arrival burst priority" per process, then algorithm.
+ *    Output: CT, TAT, WT, RT per process and their averages.
+ * b. Round Robin on fixed data P1(0,10) P2(1,4) P3(3,6) P4(4,7) P5(5,2)
+ *    for q = 1..10, and find the best q for TAT, WT and RT.
+ *
+ * Formulas: TAT = CT - AT,  WT = TAT - BT,  RT = first CPU time - AT
+ * Lower priority number = higher priority.
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <errno.h>
 #include <string.h>
 
-#define MAX_PROC 20
-
-
-/* ============================================================================
- * QUESTION / EXPERIMENT 6: CPU SCHEDULING ALGORITHMS
- * ============================================================================
- * a. Write generic code in C of CPU Scheduling Algorithms:
- *    - FCFS (First Come First Serve)
- *    - SJF (Shortest Job First - Non-Preemptive)
- *    - SRTF (Shortest Remaining Time First - Preemptive SJF)
- *    - RR (Round Robin)
- *    - Non-Preemptive Priority
- *    - Preemptive Priority
- *    In the program first user will input data in sequence like process no.,
- *    arrival time, burst time, and priority and then select any one algorithm
- *    to get TAT, WT and RT for each process and their averages. (If RR is selected,
- *    also take time quantum as input).
- *
- * b. Write generic simulation code in C for RR algorithm for given data:
- *      Process   Arrival Time   Burst Time
- *        P1            0             10
- *        P2            1              4
- *        P3            3              6
- *        P4            4              7
- *        P5            5              2
- *    Perform the analysis of different time quantum values (q = 1 to 10 ms)
- *    and find out the optimal value of time quantum for TAT, WT, and RT.
- * ============================================================================ */
+#define MAX 20
 
 typedef struct {
-    int pid;
-    int at;                  /* Arrival Time */
-    int bt;                  /* Burst Time */
-    int priority;            /* Priority (lower number = higher priority) */
-    int ct;                  /* Completion Time */
-    int tat;                 /* Turnaround Time = CT - AT */
-    int wt;                  /* Waiting Time = TAT - BT */
-    int rt;                  /* Response Time = First Response - AT */
-    int rem_bt;              /* Remaining Burst Time for preemptive scheduling */
-    int first_response_time; /* Time when CPU first touched process */
-    bool completed;
+    int pid, at, bt, pr;   /* input: id, arrival, burst, priority */
+    int ct, rt;            /* output: completion, response */
+    int rem, done;         /* work: remaining burst, finished flag */
 } Process;
 
-/* Helper: Print scheduling output table */
-void print_schedule_table(Process p[], int n, const char *algo_name) {
+void print_table(Process p[], int n, const char *name) {
     float total_tat = 0, total_wt = 0, total_rt = 0;
     printf("\n========================================================================================\n");
-    printf("  CPU SCHEDULING ALGORITHM: %s\n", algo_name);
+    printf("  CPU SCHEDULING ALGORITHM: %s\n", name);
     printf("========================================================================================\n");
     printf("%-8s %-12s %-12s %-10s %-8s %-8s %-8s %-8s\n",
            "PID", "Arrival(AT)", "Burst(BT)", "Priority", "CT", "TAT", "WT", "RT");
     printf("----------------------------------------------------------------------------------------\n");
-
     for (int i = 0; i < n; i++) {
-        total_tat += p[i].tat;
-        total_wt += p[i].wt;
+        int tat = p[i].ct - p[i].at;
+        int wt = tat - p[i].bt;
+        total_tat += tat;
+        total_wt += wt;
         total_rt += p[i].rt;
         printf("P%-7d %-12d %-12d %-10d %-8d %-8d %-8d %-8d\n",
-               p[i].pid, p[i].at, p[i].bt, p[i].priority,
-               p[i].ct, p[i].tat, p[i].wt, p[i].rt);
+               p[i].pid, p[i].at, p[i].bt, p[i].pr, p[i].ct, tat, wt, p[i].rt);
     }
-
     printf("----------------------------------------------------------------------------------------\n");
     printf("Average Turnaround Time (TAT) : %.2f ms\n", total_tat / n);
     printf("Average Waiting Time (WT)    : %.2f ms\n", total_wt / n);
@@ -87,275 +54,93 @@ void print_schedule_table(Process p[], int n, const char *algo_name) {
     printf("========================================================================================\n\n");
 }
 
-/* 1. First Come First Serve (FCFS) */
-void schedule_fcfs(Process p[], int n) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) temp[i] = p[i];
-
-    /* Sort by arrival time */
-    for (int i = 0; i < n - 1; i++) {
-        for (int j = 0; j < n - i - 1; j++) {
-            if (temp[j].at > temp[j + 1].at) {
-                Process t = temp[j];
-                temp[j] = temp[j + 1];
-                temp[j + 1] = t;
+/* FCFS: sort by arrival, then run one after another */
+void fcfs(Process p[], int n) {
+    for (int i = 0; i < n - 1; i++)
+        for (int j = 0; j < n - i - 1; j++)
+            if (p[j].at > p[j + 1].at) {
+                Process t = p[j]; p[j] = p[j + 1]; p[j + 1] = t;
             }
-        }
-    }
 
-    int current_time = 0;
+    int time = 0;
     for (int i = 0; i < n; i++) {
-        if (current_time < temp[i].at) current_time = temp[i].at;
-        temp[i].rt = current_time - temp[i].at;
-        current_time += temp[i].bt;
-        temp[i].ct = current_time;
-        temp[i].tat = temp[i].ct - temp[i].at;
-        temp[i].wt = temp[i].tat - temp[i].bt;
+        if (time < p[i].at) time = p[i].at;   /* CPU idle until it arrives */
+        p[i].rt = time - p[i].at;
+        time += p[i].bt;
+        p[i].ct = time;
     }
-    print_schedule_table(temp, n, "First Come First Serve (FCFS)");
+    print_table(p, n, "First Come First Serve (FCFS)");
 }
 
-/* 2. Shortest Job First (SJF - Non-Preemptive) */
-void schedule_sjf_non_preemptive(Process p[], int n) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) {
-        temp[i] = p[i];
-        temp[i].completed = false;
-    }
+/* SJF / Priority (Non-Preemptive): pick arrived job with smallest key, run it fully */
+void non_preemptive(Process p[], int n, int by_priority, const char *name) {
+    for (int i = 0; i < n; i++) p[i].done = 0;
 
-    int completed = 0, current_time = 0;
-    while (completed < n) {
-        int idx = -1;
-        int min_bt = 1e9;
+    int time = 0, finished = 0;
+    while (finished < n) {
+        int best = -1, min = 1e9;
         for (int i = 0; i < n; i++) {
-            if (temp[i].at <= current_time && !temp[i].completed) {
-                if (temp[i].bt < min_bt) {
-                    min_bt = temp[i].bt;
-                    idx = i;
-                }
-            }
+            int key = by_priority ? p[i].pr : p[i].bt;
+            if (!p[i].done && p[i].at <= time && key < min) { min = key; best = i; }
         }
+        if (best == -1) { time++; continue; }   /* nobody arrived: CPU idle */
 
-        if (idx == -1) {
-            current_time++;
-        } else {
-            temp[idx].rt = current_time - temp[idx].at;
-            current_time += temp[idx].bt;
-            temp[idx].ct = current_time;
-            temp[idx].tat = temp[idx].ct - temp[idx].at;
-            temp[idx].wt = temp[idx].tat - temp[idx].bt;
-            temp[idx].completed = true;
-            completed++;
-        }
+        p[best].rt = time - p[best].at;
+        time += p[best].bt;
+        p[best].ct = time;
+        p[best].done = 1;
+        finished++;
     }
-    print_schedule_table(temp, n, "Shortest Job First (SJF - Non-Preemptive)");
+    print_table(p, n, name);
 }
 
-/* 3. Shortest Remaining Time First (SRTF - Preemptive SJF) */
-void schedule_srtf_preemptive(Process p[], int n) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) {
-        temp[i] = p[i];
-        temp[i].rem_bt = temp[i].bt;
-        temp[i].first_response_time = -1;
-        temp[i].completed = false;
-    }
+/* SRTF / Priority (Preemptive): every 1 ms pick arrived job with smallest key, run 1 ms */
+void preemptive(Process p[], int n, int by_priority, const char *name) {
+    for (int i = 0; i < n; i++) p[i].rem = p[i].bt;
 
-    int completed = 0, current_time = 0;
-    while (completed < n) {
-        int idx = -1;
-        int min_rem = 1e9;
-
+    int time = 0, finished = 0;
+    while (finished < n) {
+        int best = -1, min = 1e9;
         for (int i = 0; i < n; i++) {
-            if (temp[i].at <= current_time && !temp[i].completed) {
-                if (temp[i].rem_bt < min_rem && temp[i].rem_bt > 0) {
-                    min_rem = temp[i].rem_bt;
-                    idx = i;
-                }
-            }
+            int key = by_priority ? p[i].pr : p[i].rem;
+            if (p[i].rem > 0 && p[i].at <= time && key < min) { min = key; best = i; }
         }
+        if (best == -1) { time++; continue; }   /* nobody arrived: CPU idle */
 
-        if (idx == -1) {
-            current_time++;
-        } else {
-            if (temp[idx].first_response_time == -1) {
-                temp[idx].first_response_time = current_time;
-                temp[idx].rt = current_time - temp[idx].at;
-            }
-
-            temp[idx].rem_bt--;
-            current_time++;
-
-            if (temp[idx].rem_bt == 0) {
-                temp[idx].ct = current_time;
-                temp[idx].tat = temp[idx].ct - temp[idx].at;
-                temp[idx].wt = temp[idx].tat - temp[idx].bt;
-                temp[idx].completed = true;
-                completed++;
-            }
-        }
+        if (p[best].rem == p[best].bt) p[best].rt = time - p[best].at;   /* first run */
+        p[best].rem--;
+        time++;
+        if (p[best].rem == 0) { p[best].ct = time; finished++; }
     }
-    print_schedule_table(temp, n, "Shortest Remaining Time First (SRTF - Preemptive)");
+    print_table(p, n, name);
 }
 
-/* 4. Round Robin (RR) */
-void schedule_round_robin(Process p[], int n, int quantum) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) {
-        temp[i] = p[i];
-        temp[i].rem_bt = temp[i].bt;
-        temp[i].first_response_time = -1;
-        temp[i].completed = false;
+/* Round Robin: returns number of context switches (CPU dispatches) */
+int round_robin(Process p[], int n, int q) {
+    int queue[2000], front = 0, rear = 0;
+    int added[MAX] = {0}, time = 0, finished = 0, switches = 0, prev = -1;
+    for (int i = 0; i < n; i++) p[i].rem = p[i].bt;
+
+    while (finished < n) {
+        /* new arrivals join the queue first, then the preempted process */
+        for (int i = 0; i < n; i++)
+            if (!added[i] && p[i].at <= time) { queue[rear++] = i; added[i] = 1; }
+        if (prev != -1) { queue[rear++] = prev; prev = -1; }
+
+        if (front == rear) { time++; continue; }   /* queue empty: CPU idle */
+
+        int i = queue[front++];
+        switches++;
+        if (p[i].rem == p[i].bt) p[i].rt = time - p[i].at;   /* first run */
+        int run = p[i].rem < q ? p[i].rem : q;
+        p[i].rem -= run;
+        time += run;
+        if (p[i].rem > 0) prev = i;
+        else { p[i].ct = time; finished++; }
     }
-
-    int completed = 0, current_time = 0;
-    int queue[MAX_PROC * 100];
-    int front = 0, rear = 0;
-    bool in_queue[MAX_PROC] = {false};
-
-    /* Enqueue processes arriving at time 0 */
-    for (int i = 0; i < n; i++) {
-        if (temp[i].at <= current_time) {
-            queue[rear++] = i;
-            in_queue[i] = true;
-        }
-    }
-
-    while (completed < n) {
-        if (front == rear) {
-            /* Queue empty: advance time to next arrival */
-            current_time++;
-            for (int i = 0; i < n; i++) {
-                if (temp[i].at <= current_time && !in_queue[i] && !temp[i].completed) {
-                    queue[rear++] = i;
-                    in_queue[i] = true;
-                }
-            }
-            continue;
-        }
-
-        int idx = queue[front++];
-        in_queue[idx] = false;
-
-        if (temp[idx].first_response_time == -1) {
-            temp[idx].first_response_time = current_time;
-            temp[idx].rt = current_time - temp[idx].at;
-        }
-
-        int slice = (temp[idx].rem_bt > quantum) ? quantum : temp[idx].rem_bt;
-        temp[idx].rem_bt -= slice;
-        current_time += slice;
-
-        /* Enqueue newly arrived processes during this slice */
-        for (int i = 0; i < n; i++) {
-            if (i != idx && temp[i].at <= current_time && !in_queue[i] && !temp[i].completed) {
-                queue[rear++] = i;
-                in_queue[i] = true;
-            }
-        }
-
-        if (temp[idx].rem_bt > 0) {
-            queue[rear++] = idx;
-            in_queue[idx] = true;
-        } else {
-            temp[idx].ct = current_time;
-            temp[idx].tat = temp[idx].ct - temp[idx].at;
-            temp[idx].wt = temp[idx].tat - temp[idx].bt;
-            temp[idx].completed = true;
-            completed++;
-        }
-    }
-
-    char title[64];
-    snprintf(title, sizeof(title), "Round Robin (RR, Quantum = %d ms)", quantum);
-    print_schedule_table(temp, n, title);
+    return switches;
 }
 
-/* 5. Priority Scheduling (Non-Preemptive, Lower number = Higher priority) */
-void schedule_priority_non_preemptive(Process p[], int n) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) {
-        temp[i] = p[i];
-        temp[i].completed = false;
-    }
-
-    int completed = 0, current_time = 0;
-    while (completed < n) {
-        int idx = -1;
-        int best_prio = 1e9;
-
-        for (int i = 0; i < n; i++) {
-            if (temp[i].at <= current_time && !temp[i].completed) {
-                if (temp[i].priority < best_prio) {
-                    best_prio = temp[i].priority;
-                    idx = i;
-                }
-            }
-        }
-
-        if (idx == -1) {
-            current_time++;
-        } else {
-            temp[idx].rt = current_time - temp[idx].at;
-            current_time += temp[idx].bt;
-            temp[idx].ct = current_time;
-            temp[idx].tat = temp[idx].ct - temp[idx].at;
-            temp[idx].wt = temp[idx].tat - temp[idx].bt;
-            temp[idx].completed = true;
-            completed++;
-        }
-    }
-    print_schedule_table(temp, n, "Priority Scheduling (Non-Preemptive)");
-}
-
-/* 6. Priority Scheduling (Preemptive) */
-void schedule_priority_preemptive(Process p[], int n) {
-    Process temp[MAX_PROC];
-    for (int i = 0; i < n; i++) {
-        temp[i] = p[i];
-        temp[i].rem_bt = temp[i].bt;
-        temp[i].first_response_time = -1;
-        temp[i].completed = false;
-    }
-
-    int completed = 0, current_time = 0;
-    while (completed < n) {
-        int idx = -1;
-        int best_prio = 1e9;
-
-        for (int i = 0; i < n; i++) {
-            if (temp[i].at <= current_time && !temp[i].completed && temp[i].rem_bt > 0) {
-                if (temp[i].priority < best_prio) {
-                    best_prio = temp[i].priority;
-                    idx = i;
-                }
-            }
-        }
-
-        if (idx == -1) {
-            current_time++;
-        } else {
-            if (temp[idx].first_response_time == -1) {
-                temp[idx].first_response_time = current_time;
-                temp[idx].rt = current_time - temp[idx].at;
-            }
-
-            temp[idx].rem_bt--;
-            current_time++;
-
-            if (temp[idx].rem_bt == 0) {
-                temp[idx].ct = current_time;
-                temp[idx].tat = temp[idx].ct - temp[idx].at;
-                temp[idx].wt = temp[idx].tat - temp[idx].bt;
-                temp[idx].completed = true;
-                completed++;
-            }
-        }
-    }
-    print_schedule_table(temp, n, "Priority Scheduling (Preemptive)");
-}
-
-/* Interactive Dispatcher for Part 6a */
 void run_lab6_part_a(void) {
     printf("\n======================================================================\n");
     printf("  OS LAB 6 (Part a): Generic CPU Scheduling Algorithms in C\n");
@@ -364,17 +149,17 @@ void run_lab6_part_a(void) {
 
     int n;
     printf("Enter number of processes (e.g. 5): ");
-    if (scanf("%d", &n) != 1 || n <= 0 || n > MAX_PROC) {
+    if (scanf("%d", &n) != 1 || n <= 0 || n > MAX) {
         printf("Invalid input or process count too high.\n");
         return;
     }
 
-    Process p[MAX_PROC];
+    Process p[MAX];
     printf("\nEnter process details in sequence (PID, Arrival Time, Burst Time, Priority):\n");
     for (int i = 0; i < n; i++) {
         p[i].pid = i + 1;
         printf("Process P%d -> Arrival Time, Burst Time, Priority: ", i + 1);
-        if (scanf("%d %d %d", &p[i].at, &p[i].bt, &p[i].priority) != 3) {
+        if (scanf("%d %d %d", &p[i].at, &p[i].bt, &p[i].pr) != 3) {
             printf("Error reading input.\n");
             return;
         }
@@ -392,34 +177,22 @@ void run_lab6_part_a(void) {
     int choice;
     if (scanf("%d", &choice) != 1) return;
 
-    if (choice == 1) schedule_fcfs(p, n);
-    else if (choice == 2) schedule_sjf_non_preemptive(p, n);
-    else if (choice == 3) schedule_srtf_preemptive(p, n);
+    if (choice == 1) fcfs(p, n);
+    else if (choice == 2) non_preemptive(p, n, 0, "Shortest Job First (SJF - Non-Preemptive)");
+    else if (choice == 3) preemptive(p, n, 0, "Shortest Remaining Time First (SRTF - Preemptive)");
     else if (choice == 4) {
         int q;
         printf("Enter Time Quantum (ms): ");
         if (scanf("%d", &q) != 1 || q <= 0) q = 2;
-        schedule_round_robin(p, n, q);
+        round_robin(p, n, q);
+        char name[64];
+        snprintf(name, sizeof(name), "Round Robin (RR, Quantum = %d ms)", q);
+        print_table(p, n, name);
     }
-    else if (choice == 5) schedule_priority_non_preemptive(p, n);
-    else if (choice == 6) schedule_priority_preemptive(p, n);
+    else if (choice == 5) non_preemptive(p, n, 1, "Priority Scheduling (Non-Preemptive)");
+    else if (choice == 6) preemptive(p, n, 1, "Priority Scheduling (Preemptive)");
     else printf("Invalid algorithm selection.\n");
 }
-
-
-/* ============================================================================
- * QUESTION / EXPERIMENT 6 (Part b): ROUND ROBIN BENCHMARK & QUANTUM SWEEP
- * ============================================================================
- * Given Benchmark Dataset:
- *   P1: AT = 0, BT = 10
- *   P2: AT = 1, BT = 4
- *   P3: AT = 3, BT = 6
- *   P4: AT = 4, BT = 7
- *   P5: AT = 5, BT = 2
- *
- * Perform simulation for time quantum q = 1 to 10 ms, tabulate metrics,
- * and identify the optimal quantum values for TAT, WT, and RT.
- * ============================================================================ */
 
 void run_lab6_part_b(void) {
     printf("\n======================================================================\n");
@@ -428,128 +201,49 @@ void run_lab6_part_b(void) {
     printf("  Student: Aradhya Jain | Scholar No: 24112011111 | Section: CSE-1\n");
     printf("======================================================================\n");
 
-    Process benchmark[5] = {
-        {1, 0, 10, 0, 0, 0, 0, 0, 10, -1, false},
-        {2, 1,  4, 0, 0, 0, 0, 0,  4, -1, false},
-        {3, 3,  6, 0, 0, 0, 0, 0,  6, -1, false},
-        {4, 4,  7, 0, 0, 0, 0, 0,  7, -1, false},
-        {5, 5,  2, 0, 0, 0, 0, 0,  2, -1, false}
-    };
-    int n = 5;
+    int n = 5, at[5] = {0, 1, 3, 4, 5}, bt[5] = {10, 4, 6, 7, 2};
+    Process p[5];
+    for (int i = 0; i < n; i++) { p[i].pid = i + 1; p[i].at = at[i]; p[i].bt = bt[i]; }
 
     printf("\n%-14s %-16s %-16s %-16s %-12s\n",
            "Quantum (q)", "Avg TAT (ms)", "Avg WT (ms)", "Avg RT (ms)", "Context Switches");
     printf("--------------------------------------------------------------------------------\n");
 
     float min_tat = 1e9, min_wt = 1e9, min_rt = 1e9;
-    int opt_q_tat = 1, opt_q_wt = 1, opt_q_rt = 1;
+    int best_tat = 1, best_wt = 1, best_rt = 1;
 
     for (int q = 1; q <= 10; q++) {
-        Process temp[5];
-        for (int i = 0; i < n; i++) {
-            temp[i] = benchmark[i];
-            temp[i].rem_bt = temp[i].bt;
-            temp[i].first_response_time = -1;
-            temp[i].completed = false;
-        }
-
-        int completed = 0, current_time = 0, switches = 0;
-        int queue[500];
-        int front = 0, rear = 0;
-        bool in_queue[5] = {false};
-
-        for (int i = 0; i < n; i++) {
-            if (temp[i].at <= current_time) {
-                queue[rear++] = i;
-                in_queue[i] = true;
-            }
-        }
-
-        while (completed < n) {
-            if (front == rear) {
-                current_time++;
-                for (int i = 0; i < n; i++) {
-                    if (temp[i].at <= current_time && !in_queue[i] && !temp[i].completed) {
-                        queue[rear++] = i;
-                        in_queue[i] = true;
-                    }
-                }
-                continue;
-            }
-
-            int idx = queue[front++];
-            in_queue[idx] = false;
-            switches++;
-
-            if (temp[idx].first_response_time == -1) {
-                temp[idx].first_response_time = current_time;
-                temp[idx].rt = current_time - temp[idx].at;
-            }
-
-            int slice = (temp[idx].rem_bt > q) ? q : temp[idx].rem_bt;
-            temp[idx].rem_bt -= slice;
-            current_time += slice;
-
-            for (int i = 0; i < n; i++) {
-                if (i != idx && temp[i].at <= current_time && !in_queue[i] && !temp[i].completed) {
-                    queue[rear++] = i;
-                    in_queue[i] = true;
-                }
-            }
-
-            if (temp[idx].rem_bt > 0) {
-                queue[rear++] = idx;
-                in_queue[idx] = true;
-            } else {
-                temp[idx].ct = current_time;
-                temp[idx].tat = temp[idx].ct - temp[idx].at;
-                temp[idx].wt = temp[idx].tat - temp[idx].bt;
-                temp[idx].completed = true;
-                completed++;
-            }
-        }
+        int switches = round_robin(p, n, q);
 
         float total_tat = 0, total_wt = 0, total_rt = 0;
         for (int i = 0; i < n; i++) {
-            total_tat += temp[i].tat;
-            total_wt += temp[i].wt;
-            total_rt += temp[i].rt;
+            int tat = p[i].ct - p[i].at;
+            total_tat += tat;
+            total_wt += tat - p[i].bt;
+            total_rt += p[i].rt;
         }
-        float avg_tat = total_tat / n;
-        float avg_wt = total_wt / n;
-        float avg_rt = total_rt / n;
+        float avg_tat = total_tat / n, avg_wt = total_wt / n, avg_rt = total_rt / n;
 
         printf("q = %-9d %-16.2f %-16.2f %-16.2f %-12d\n",
                q, avg_tat, avg_wt, avg_rt, switches);
 
-        if (avg_tat < min_tat) { min_tat = avg_tat; opt_q_tat = q; }
-        if (avg_wt < min_wt)   { min_wt = avg_wt;   opt_q_wt = q; }
-        if (avg_rt < min_rt)   { min_rt = avg_rt;   opt_q_rt = q; }
+        /* keep the first q that gives the smallest average */
+        if (avg_tat < min_tat) { min_tat = avg_tat; best_tat = q; }
+        if (avg_wt < min_wt)   { min_wt = avg_wt;   best_wt = q; }
+        if (avg_rt < min_rt)   { min_rt = avg_rt;   best_rt = q; }
     }
 
     printf("--------------------------------------------------------------------------------\n");
     printf("[OPTIMAL ANALYSIS RESULTS]:\n");
-    printf("  Optimal Quantum for Turnaround Time (TAT) : q = %d ms (Avg TAT = %.2f ms)\n", opt_q_tat, min_tat);
-    printf("  Optimal Quantum for Waiting Time (WT)    : q = %d ms (Avg WT  = %.2f ms)\n", opt_q_wt, min_wt);
-    printf("  Optimal Quantum for Response Time (RT)   : q = %d ms (Avg RT  = %.2f ms)\n", opt_q_rt, min_rt);
+    printf("  Optimal Quantum for Turnaround Time (TAT) : q = %d ms (Avg TAT = %.2f ms)\n", best_tat, min_tat);
+    printf("  Optimal Quantum for Waiting Time (WT)    : q = %d ms (Avg WT  = %.2f ms)\n", best_wt, min_wt);
+    printf("  Optimal Quantum for Response Time (RT)   : q = %d ms (Avg RT  = %.2f ms)\n", best_rt, min_rt);
     printf("======================================================================\n\n");
 }
 
-
-/* ============================================================================
- * MAIN ENTRY POINT & INTERACTIVE MENU
- * ============================================================================ */
-
 int main(int argc, char *argv[]) {
-    if (argc >= 2) {
-        if (strcmp(argv[1], "--lab6a") == 0) {
-            run_lab6_part_a();
-            return 0;
-        } else if (strcmp(argv[1], "--lab6b") == 0) {
-            run_lab6_part_b();
-            return 0;
-        }
-    }
+    if (argc >= 2 && strcmp(argv[1], "--lab6a") == 0) { run_lab6_part_a(); return 0; }
+    if (argc >= 2 && strcmp(argv[1], "--lab6b") == 0) { run_lab6_part_b(); return 0; }
 
     while (1) {
         printf("======================================================================\n");
@@ -565,17 +259,10 @@ int main(int argc, char *argv[]) {
         int opt;
         if (scanf("%d", &opt) != 1) break;
 
-        if (opt == 1) {
-            run_lab6_part_a();
-        } else if (opt == 2) {
-            run_lab6_part_b();
-        } else if (opt == 0) {
-            printf("Exiting. Thank you!\n");
-            break;
-        } else {
-            printf("Invalid selection.\n\n");
-        }
+        if (opt == 1) run_lab6_part_a();
+        else if (opt == 2) run_lab6_part_b();
+        else if (opt == 0) { printf("Exiting. Thank you!\n"); break; }
+        else printf("Invalid selection.\n\n");
     }
-
     return 0;
 }
